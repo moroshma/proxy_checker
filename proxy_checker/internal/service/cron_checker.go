@@ -55,7 +55,7 @@ func (r *CroneChecker) Run() {
 		jobs := make(chan models.Proxy, len(proxies))
 		var wg sync.WaitGroup
 
-		workers := 10
+		workers := 5_000
 		if len(proxies) < workers {
 			workers = len(proxies)
 		}
@@ -161,38 +161,62 @@ func (r *CroneChecker) trySocks5(addr string) (*http.Client, int, bool) {
 	}
 	client := &http.Client{Transport: transport, Timeout: r.timeout}
 
-	//speed, ok := r.measureSpeed(client)
-	//if !ok {
-	//	return nil, 0, false
-	//}
+	speed, ok := r.measureSpeed(client)
+	if !ok {
+		return nil, 0, false
+	}
 
-	return client, 1337, true
+	return client, speed, true
 }
-
 func (r *CroneChecker) tryHTTP(addr string) (*http.Client, int, bool) {
 	proxyURL := &url.URL{Scheme: "http", Host: addr}
+
 	transport := &http.Transport{
-		Proxy:           http.ProxyURL(proxyURL),
+		Proxy: http.ProxyURL(proxyURL),
+
+		// Важно: таймауты на этапы
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+
+		// Если нужно, но лучше избегать:
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
-	client := &http.Client{Transport: transport, Timeout: r.timeout}
 
-	//speed, ok := r.measureSpeed(client)
-	//if !ok {
-	//	return nil, 0, false
-	//}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   r.timeout, // общий лимит
+	}
 
-	return client, 1337, true
+	speed, ok := r.measureSpeed(client)
+	if !ok {
+		return nil, 0, false
+	}
+
+	return client, speed, true
 }
 
 func (r *CroneChecker) measureSpeed(client *http.Client) (int, bool) {
 	start := time.Now()
-	resp, err := client.Get("http://speedtest.tele2.net/1MB.zip")
+
+	req, err := http.NewRequest("GET", "https://ip.pn/", nil)
 	if err != nil {
 		return 0, false
 	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return int(time.Since(start).Milliseconds()), true
 }
 
