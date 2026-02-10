@@ -9,6 +9,5 @@ type ProxyCheckServiceReq struct {
 }
 
 type ProxyCheckServiceResponse struct {
-	CheckID       string `json:"check_id"`
-	ProxyMetricID string `json:"proxy_metric"`
+	CheckID string `json:"check_id"`
 }
